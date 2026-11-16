@@ -43,7 +43,7 @@ func (w Worker) RunDlq(ctx context.Context) error {
     }
     defer file.Close()
 
-    return w.client.ConsumeDlq(
+    return w.consumer.ConsumeDlq(
         ctx,
         dlqBatchSize,
         dlqFlushInterval,

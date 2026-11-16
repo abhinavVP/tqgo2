@@ -14,16 +14,21 @@ import (
 type Worker struct {
 	ID       int
 	SubbedTo tasks.Type
-	client   *rabbitmq.ConsumerClient
+	consumer Consumer
 	logger   *log.Logger
 }
 
-func NewWorker(id int, subbedTo tasks.Type, client *rabbitmq.ConsumerClient, logger *log.Logger) Worker {
-	return Worker{ID: id, SubbedTo: subbedTo, client: client, logger: logger}
+type Consumer interface {
+	Consume(context.Context, tasks.Type, rabbitmq.Handler) error 
+	ConsumeDlq(ctx context.Context, batchSize int, flushInterval time.Duration,handler rabbitmq.DLQBatchHandler) error
+}
+
+func NewWorker(id int, subbedTo tasks.Type, client *rabbitmq.Client, logger *log.Logger) Worker {
+	return Worker{ID: id, SubbedTo: subbedTo, consumer: client, logger: logger}
 }
 
 func (w Worker) Run(ctx context.Context) error {
-	return w.client.Consume(ctx, w.SubbedTo, w.handler)
+	return w.consumer.Consume(ctx, w.SubbedTo, w.handler)
 }
 
 func (w Worker) handler(_ context.Context, message rabbitmq.Message) error {

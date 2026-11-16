@@ -25,7 +25,7 @@ func main() {
 	if amqpURL == "" {
 		log.Fatal("AMQP_URL is required; set it in .env")
 	}
-	broker, err := rabbitmq.ConsumerConnect(amqpURL)
+	broker, err := rabbitmq.Connect(amqpURL)
 	if err != nil {
 		log.Fatalf("rabbitmq setup: %v", err)
 	}

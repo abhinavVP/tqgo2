@@ -14,23 +14,23 @@ import (
 
 // Client owns one RabbitMQ connection. It publishes durably and waits for a
 // broker confirmation before returning success to the scheduler.
-type ProducerClient struct {
+type Client struct {
 	Connection *amqp091.Connection
 }
 
-func ProducerConnect(url string) (*ProducerClient, error) {
+func Connect(url string) (*Client, error) {
 	connection, err := amqp091.Dial(url)
 	if err != nil {
 		return nil, fmt.Errorf("connect to rabbitmq: %w", err)
 	}
-	return &ProducerClient{Connection: connection}, nil
+	return &Client{Connection: connection}, nil
 }
 
-func (c *ProducerClient) Close() error { return c.Connection.Close() }
+func (c *Client) Close() error { return c.Connection.Close() }
 
 // Enqueue publishes task to its type-specific durable queue. It is serialized
 // because AMQP channels are not safe for concurrent use.
-func (c *ProducerClient) Enqueue(ctx context.Context, task tasks.Task) error {
+func (c *Client) Enqueue(ctx context.Context, task tasks.Task) error {
 	queue, err := queueFor(task.TaskType)
 	if err != nil {
 		return err

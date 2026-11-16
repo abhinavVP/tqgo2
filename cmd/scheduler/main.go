@@ -30,7 +30,7 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("database unavailable: %v", err)
 	}
-	broker, err := rabbitmq.ProducerConnect(required("AMQP_URL"))
+	broker, err := rabbitmq.Connect(required("AMQP_URL"))
 	if err != nil {
 		log.Fatalf("rabbitmq setup: %v", err)
 	}
@@ -50,7 +50,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Print("scheduler starting...")
+	log.Print("scheduler starting...") 
+
+	schedulerLoop(ctx, service, interval)
+}
+
+func schedulerLoop(ctx context.Context, service *scheduler.Service, interval time.Duration) {
 	for {
 		if err := service.RunOnce(ctx); err != nil {
 			log.Printf("scheduler cycle: %v", err)

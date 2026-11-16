@@ -13,24 +13,10 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
-type ConsumerClient struct {
-	Connection *amqp091.Connection
-}
-
-func ConsumerConnect(url string) (*ConsumerClient, error) {
-	connection, err := amqp091.Dial(url)
-	if err != nil {
-		return nil, fmt.Errorf("connect to rabbitmq: %w", err)
-	}
-	return &ConsumerClient{Connection: connection}, nil
-}
-
-func (c *ConsumerClient) Close() error { return c.Connection.Close() }
-
 // Handler runs a task after RabbitMQ delivers it
 type Handler func(context.Context, Message) error
 
-func (c *ConsumerClient) Consume(ctx context.Context, taskType tasks.Type, handler Handler) error {
+func (c *Client) Consume(ctx context.Context, taskType tasks.Type, handler Handler) error {
 	queue, err := queueFor(taskType)
 	if err != nil {
 		return err
@@ -120,7 +106,7 @@ func (c *ConsumerClient) Consume(ctx context.Context, taskType tasks.Type, handl
 
 type DLQBatchHandler func(context.Context, []amqp091.Delivery) error
 
-func (c *ConsumerClient) ConsumeDlq(ctx context.Context, batchSize int, flushInterval time.Duration,handler DLQBatchHandler) error {
+func (c *Client) ConsumeDlq(ctx context.Context, batchSize int, flushInterval time.Duration,handler DLQBatchHandler) error {
     channel, err := c.Connection.Channel()
     if err != nil {
         return fmt.Errorf("create DLQ channel: %w", err)

@@ -16,7 +16,7 @@ type Pool struct {
 	workers []Worker
 }
 
-func NewPool(count int, client *rabbitmq.ConsumerClient, logger *log.Logger) (*Pool, error) {
+func NewPool(count int, client *rabbitmq.Client, logger *log.Logger) (*Pool, error) {
 	if count <= 0 || count%2 != 0 {
 		return nil, fmt.Errorf("worker count must be a positive even number")
 	}
