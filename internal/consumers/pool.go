@@ -16,7 +16,7 @@ type Pool struct {
 	workers []Worker
 }
 
-func NewPool(count int, client *rabbitmq.Client, logger *log.Logger) (*Pool, error) {
+func NewPool(count int, client *rabbitmq.ConsumerClient, logger *log.Logger) (*Pool, error) {
 	if count <= 0 || count%2 != 0 {
 		return nil, fmt.Errorf("worker count must be a positive even number")
 	}
@@ -27,6 +27,8 @@ func NewPool(count int, client *rabbitmq.Client, logger *log.Logger) (*Pool, err
 	for id := count/2 + 1; id <= count; id++ {
 		workers = append(workers, NewWorker(id, tasks.EmailCallback, client, logger))
 	}
+
+	workers = append(workers, NewWorker(999, rabbitmq.DeadLetterQueue, client, logger)) //id 999 only for dlq worker (idk what to do here) 
 	return &Pool{workers: workers}, nil
 }
 
@@ -37,12 +39,21 @@ func (p *Pool) Run(ctx context.Context) error {
 	var group sync.WaitGroup
 	for _, worker := range p.workers {
 		group.Add(1)
-		go func(worker Worker) {
-			defer group.Done()
-			if err := worker.Run(ctx); err != nil {
-				errs <- err
-			}
-		}(worker)
+		if (worker.ID == 999) {
+			go func (worker Worker) {
+				defer group.Done()
+				if err := worker.RunDlq(ctx); err != nil {
+					errs <- err
+				}
+			} (worker)
+		} else {
+			go func(worker Worker) {
+				defer group.Done()
+				if err := worker.Run(ctx); err != nil {
+					errs <- err
+				}
+			}(worker)
+		}
 	}
 	done := make(chan struct{})
 	go func() { group.Wait(); close(done) }()

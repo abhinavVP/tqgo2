@@ -30,7 +30,7 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("database unavailable: %v", err)
 	}
-	broker, err := rabbitmq.Connect(required("AMQP_URL"))
+	broker, err := rabbitmq.ProducerConnect(required("AMQP_URL"))
 	if err != nil {
 		log.Fatalf("rabbitmq setup: %v", err)
 	}
@@ -42,6 +42,10 @@ func main() {
 	interval := durationEnv("SCHEDULER_INTERVAL", 10*time.Second)
 	if interval <= 0 {
 		log.Fatal("SCHEDULER_INTERVAL must be positive")
+	}
+
+	if err := rabbitmq.SetupTopology(broker.Connection); err != nil {
+    	log.Fatalf("rabbitmq topology setup: %v", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
