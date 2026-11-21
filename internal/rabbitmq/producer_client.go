@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,6 +15,8 @@ import (
 // broker confirmation before returning success to the scheduler.
 type Client struct {
 	Connection *amqp091.Connection
+	Channel	   *amqp091.Channel
+	Confirmed  chan amqp091.Confirmation
 }
 
 func Connect(url string) (*Client, error) {
@@ -26,58 +27,55 @@ func Connect(url string) (*Client, error) {
 	return &Client{Connection: connection}, nil
 }
 
-func (c *Client) Close() error { return c.Connection.Close() }
+func (c *Client) Close() error { 
+	if err := c.Channel.Close(); err != nil {
+		return err
+	}
+	return c.Connection.Close() 
+}
 
-// Enqueue publishes task to its type-specific durable queue. It is serialized
-// because AMQP channels are not safe for concurrent use.
+func (c *Client) InitPublisher() error {
+	channel, err := c.Connection.Channel()
+	if err != nil {
+		return fmt.Errorf("open rabbitmq channel: %w", err)
+	}
+
+	if err := channel.Confirm(false); err != nil {
+		return fmt.Errorf("enable publish confirmations: %w", err)
+	}
+
+	c.Channel = channel
+	c.Confirmed = channel.NotifyPublish(make(chan amqp091.Confirmation, 1))
+
+	return nil
+}
+
+// Enqueue publishes task to its type-specific durable queue.
 func (c *Client) Enqueue(ctx context.Context, task tasks.Task) error {
 	queue, err := queueFor(task.TaskType)
 	if err != nil {
 		return err
 	}
 
-	body, err := json.Marshal(Message{
-		ID:          task.ID,
-		TaskType:    task.TaskType,
-		ScheduledAt: task.ScheduledAt,
-		ExpiresAt:   task.ExpiresAt,
-		Payload:     task.Payload,
-	})
+	body, err := taskToMessageJSON(task)
+
 	if err != nil {
-		return fmt.Errorf("marshal task message: %w", err)
+		return fmt.Errorf("enqueue message JSON marshal: %v", err)
 	}
 
-	channel, err := c.Connection.Channel()
-	if err != nil {
-		return fmt.Errorf("open rabbitmq channel: %w", err)
-	}
-	defer channel.Close()
-
-	if err := channel.Confirm(false); err != nil {
-		return fmt.Errorf("enable publish confirmations: %w", err)
-	}
-
-	confirmed := channel.NotifyPublish(make(chan amqp091.Confirmation, 1))
-
-	if err := channel.PublishWithContext(
+	if err := c.Channel.PublishWithContext(
 		ctx,
 		"",
 		queue,
 		false,
 		false,
-		amqp091.Publishing{
-			ContentType:  "application/json",
-			DeliveryMode: amqp091.Persistent,
-			MessageId:    task.ID,
-			Timestamp:    time.Now().UTC(),
-			Body:         body,
-		},
+		resolveMessage(task.ID, body),
 	); err != nil {
 		return fmt.Errorf("publish task %s: %w", task.ID, err)
 	}
 
 	select {
-	case confirmation := <-confirmed:
+	case confirmation := <-c.Confirmed:
 		if !confirmation.Ack {
 			return fmt.Errorf("rabbitmq did not confirm task %s", task.ID)
 		}
@@ -85,5 +83,15 @@ func (c *Client) Enqueue(ctx context.Context, task tasks.Task) error {
 
 	case <-ctx.Done():
 		return fmt.Errorf("wait for publish confirmation: %w", ctx.Err())
+	}
+}
+
+func resolveMessage(taskId string, body []byte) amqp091.Publishing {
+	return amqp091.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp091.Persistent,
+		MessageId:    taskId,
+		Timestamp:    time.Now().UTC(),
+		Body:         body,
 	}
 }

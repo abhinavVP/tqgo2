@@ -30,18 +30,19 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("database unavailable: %v", err)
 	}
+	interval := durationEnv("SCHEDULER_INTERVAL", 10*time.Second)
+	if interval <= 0 {
+		log.Fatal("SCHEDULER_INTERVAL must be positive")
+	}
 	broker, err := rabbitmq.Connect(required("AMQP_URL"))
 	if err != nil {
 		log.Fatalf("rabbitmq setup: %v", err)
 	}
 	defer broker.Close()
+	
 	service, err := scheduler.New(repository.NewMySQLTaskRepository(db), broker, scheduler.Config{BatchSize: intEnv("SCHEDULER_BATCH_SIZE", 100)})
 	if err != nil {
 		log.Fatalf("scheduler configuration: %v", err)
-	}
-	interval := durationEnv("SCHEDULER_INTERVAL", 10*time.Second)
-	if interval <= 0 {
-		log.Fatal("SCHEDULER_INTERVAL must be positive")
 	}
 
 	if err := rabbitmq.SetupTopology(broker.Connection); err != nil {

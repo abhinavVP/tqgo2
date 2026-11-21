@@ -33,6 +33,7 @@ type Service struct {
 	publisher  Publisher
 	config     Config
 	now        func() time.Time
+
 }
 
 func New(repository *repository.MySQLTaskRepository, publisher Publisher, config Config) (*Service, error) {
