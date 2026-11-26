@@ -2,6 +2,7 @@ package rabbitmq
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,7 +10,6 @@ import (
 
 	"scheduled-pipeline/internal/tasks"
 )
-
 
 // Client owns one RabbitMQ connection. It publishes durably and waits for a
 // broker confirmation before returning success to the scheduler.
@@ -24,7 +24,12 @@ func Connect(url string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to rabbitmq: %w", err)
 	}
-	return &Client{Connection: connection}, nil
+	c := Client{Connection: connection}
+	if err := c.InitChannel(); err != nil{
+		return nil, fmt.Errorf("init channel failed: %w", err)
+	}
+
+	return &c, nil
 }
 
 func (c *Client) Close() error { 
@@ -34,7 +39,7 @@ func (c *Client) Close() error {
 	return c.Connection.Close() 
 }
 
-func (c *Client) InitPublisher() error {
+func (c *Client) InitChannel() error {
 	channel, err := c.Connection.Channel()
 	if err != nil {
 		return fmt.Errorf("open rabbitmq channel: %w", err)
@@ -95,3 +100,46 @@ func resolveMessage(taskId string, body []byte) amqp091.Publishing {
 		Body:         body,
 	}
 }
+
+func taskToMessageJSON(t tasks.Task) ([]byte, error) {
+	body, err := json.Marshal(Message{
+		ID:          t.ID,
+		TaskType:    t.TaskType,
+		ScheduledAt: t.ScheduledAt,
+		ExpiresAt:   t.ExpiresAt,
+		Payload:     t.Payload,
+	})
+
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return body, nil
+}
+
+func (c * Client) PublishMessage(ctx context.Context, t tasks.Task) error {
+	queue, err := queueFor(t.TaskType)
+	if err != nil {
+		return err
+	}
+
+	body, err := taskToMessageJSON(t)
+
+	if err != nil {
+		return fmt.Errorf("enqueue message JSON marshal: %v", err)
+	}
+
+	if err := c.Channel.PublishWithContext(
+		ctx,
+		"",
+		queue,
+		false,
+		false,
+		resolveMessage(t.ID, body),
+	); err != nil {
+		return fmt.Errorf("publish task %s: %w", t.ID, err)
+	}
+
+	return nil
+}
+

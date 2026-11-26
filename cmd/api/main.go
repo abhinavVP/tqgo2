@@ -26,7 +26,7 @@ func main() {
 
 	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
-		log.Fatal("MYSQL_DSN is required; copy .env.example to .env and set it")
+		log.Fatal("MYSQL_DSN is required")
 	}
 	db, err := database.Open(dsn)
 	if err != nil {
@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("database unavailable: %v", err)
 	}
 
-	server := &http.Server{Addr: envOr("HTTP_ADDR", ":8080"), Handler: httpapi.New(repository.NewMySQLTaskRepository(db)).Routes(), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: envOr("HTTP_ADDR", ":8089"), Handler: httpapi.New(repository.NewMySQLTaskRepository(db)).Routes(), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		log.Printf("API listening on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

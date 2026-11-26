@@ -11,7 +11,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"scheduled-pipeline/internal/consumers"
+	"scheduled-pipeline/internal/consumer"
 	"scheduled-pipeline/internal/rabbitmq"
 )
 
@@ -35,7 +35,7 @@ func main() {
     	log.Fatalf("rabbitmq topology setup: %v", err)
 	}
 
-	pool, err := consumers.NewPool(*workerCount, broker, log.Default())
+	pool, err := consumer.NewPool(*workerCount, broker, log.Default())
 	if err != nil {
 		log.Fatal(err)
 	}

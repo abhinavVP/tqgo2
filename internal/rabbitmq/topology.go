@@ -122,19 +122,3 @@ func SetupTopology(connection *amqp091.Connection) error {
 
     return setupTopology(channel)
 }
-
-func taskToMessageJSON(t tasks.Task) ([]byte, error) {
-	body, err := json.Marshal(Message{
-		ID:          t.ID,
-		TaskType:    t.TaskType,
-		ScheduledAt: t.ScheduledAt,
-		ExpiresAt:   t.ExpiresAt,
-		Payload:     t.Payload,
-	})
-
-	if err != nil {
-		return []byte{}, err
-	}
-
-	return body, nil
-}

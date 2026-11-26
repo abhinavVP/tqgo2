@@ -5,81 +5,77 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
+	"scheduled-pipeline/internal/publisher"
 	"scheduled-pipeline/internal/repository"
-	"scheduled-pipeline/internal/tasks"
+
+	"github.com/google/uuid"
 )
-
-type Publisher interface {
-	Enqueue(context.Context, tasks.Task) error
-}
-
-type Config struct {
-	BatchSize int
-}
-
-func (c Config) Validate() error {
-	if c.BatchSize < 1 {
-		return fmt.Errorf("batch size must be at least 1")
-	}
-	return nil
-}
 
 // Service moves due, unexpired submitted tasks to RabbitMQ, then expires
 // submitted tasks whose explicit deadline has passed.
 type Service struct {
-	repository *repository.MySQLTaskRepository
-	publisher  Publisher
-	config     Config
-	now        func() time.Time
-
+	id 			string
+	repository  *repository.MySQLTaskRepository
+	publisher   *publisher.Publisher
 }
 
-func New(repository *repository.MySQLTaskRepository, publisher Publisher, config Config) (*Service, error) {
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-	return &Service{repository: repository, publisher: publisher, config: config, now: time.Now}, nil
+func New(repository *repository.MySQLTaskRepository, publisher *publisher.Publisher) (*Service, error) {
+	id := uuid.NewString()
+	return &Service{id: id, repository: repository, publisher: publisher}, nil
 }
 
-// RunOnce is intentionally bounded by BatchSize, so one slow cycle cannot
-// monopolize the process. A later cycle processes the next batch.
-func (s *Service) RunOnce(ctx context.Context) error {
-	now := s.now().UTC()
-	due, err := s.repository.FindDue(ctx, now, s.config.BatchSize)
+func (s *Service) RunOnce(ctx context.Context, batchSize int, leaseTTl time.Duration) error {
+	due, err := s.repository.FindDue(ctx, batchSize, leaseTTl)
 	if err != nil {
 		return err
 	}
-	if len(due) > 0 {
-		log.Printf("scheduler found %d due submitted job(s)", len(due))
-	}
-
+	
 	var failures []error
-	queuedIDs := make([]string, 0, len(due))
-	for _, task := range due {
-		if err := s.publisher.Enqueue(ctx, task); err != nil {
-			failures = append(failures, fmt.Errorf("enqueue task %s: %w", task.ID, err))
-			continue
-		}
-		queuedIDs = append(queuedIDs, task.ID)
-	}
-	if len(queuedIDs) > 0 {
-		log.Printf("scheduler published %d job(s) to RabbitMQ", len(queuedIDs))
-		updated, err := s.repository.MarkQueued(ctx, queuedIDs)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("mark published tasks queued: %w", err))
-		} else if updated != int64(len(queuedIDs)) {
-			failures = append(failures, fmt.Errorf("marked %d of %d published tasks queued", updated, len(queuedIDs)))
-		} else {
-			log.Printf("scheduler marked %d job(s) QUEUED", updated)
+	
+	log.Printf("scheduler found %d due submitted job(s)", len(due))
+	
+	if len(due) > 0 {
+		for _, task := range due {
+			if err := s.publisher.Enqueue(ctx, s.id, task); err != nil {
+				failures = append(failures, fmt.Errorf("enqueue task %s: %w", task.ID, err))
+			}
 		}
 	}
 
-	if expired, err := s.repository.ExpireSubmittedAtOrBefore(ctx, now); err != nil {
+	if expired, err := s.repository.ExpireSubmittedAtOrBefore(ctx); err != nil {
 		failures = append(failures, err)
 	} else if expired > 0 {
 		log.Printf("scheduler marked %d job(s) EXPIRED", expired)
 	}
+
+	if inflight_expired, err := s.repository.ResetInflightExpired(ctx); err != nil {
+		failures = append(failures, err)
+	} else if inflight_expired > 0 {
+		log.Printf("scheduler reset %d job(s) to SUBMITTED", inflight_expired)
+	}
+
 	return errors.Join(failures...)
+}
+
+func (s *Service)SchedulerLoop(ctx context.Context, interval time.Duration, batchSize int, leaseTTL time.Duration) {
+	for {
+		jitter := time.Duration(rand.Int63n(int64(interval)))
+    	timer := time.NewTimer(jitter)
+		if err := s.RunOnce(ctx, batchSize, leaseTTL); err != nil {
+			log.Printf("scheduler cycle errors: %v", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Service) AckListenerLoop(ctx context.Context) {
+	s.publisher.AckListenerLoop(ctx, s.id, s.repository)
 }

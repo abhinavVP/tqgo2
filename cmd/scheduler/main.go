@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
 	"scheduled-pipeline/internal/database"
+	"scheduled-pipeline/internal/publisher"
 	"scheduled-pipeline/internal/rabbitmq"
 	"scheduled-pipeline/internal/repository"
 	"scheduled-pipeline/internal/scheduler"
@@ -31,16 +33,31 @@ func main() {
 		log.Fatalf("database unavailable: %v", err)
 	}
 	interval := durationEnv("SCHEDULER_INTERVAL", 10*time.Second)
-	if interval <= 0 {
-		log.Fatal("SCHEDULER_INTERVAL must be positive")
-	}
+	leaseTtl := durationEnv("TASK_LEASE_TTL", 60*time.Second)
+	batchSize := intEnv("SCHEDULER_BATCH_SIZE", 100)
+	ackTicker := durationEnv("ACK_LISTENER_TICKER", 30*time.Second)
+
 	broker, err := rabbitmq.Connect(required("AMQP_URL"))
 	if err != nil {
 		log.Fatalf("rabbitmq setup: %v", err)
 	}
 	defer broker.Close()
+
+	cfg := publisher.Config{
+		BatchSize: batchSize,
+		TaskLeaseTTL: leaseTtl,
+		AckTickerDuration: ackTicker,
+	}
 	
-	service, err := scheduler.New(repository.NewMySQLTaskRepository(db), broker, scheduler.Config{BatchSize: intEnv("SCHEDULER_BATCH_SIZE", 100)})
+	pub := publisher.New(
+		broker,
+		cfg,
+	)
+
+	service, err := scheduler.New(
+		repository.NewMySQLTaskRepository(db), 
+		pub,
+	)
 	if err != nil {
 		log.Fatalf("scheduler configuration: %v", err)
 	}
@@ -53,20 +70,21 @@ func main() {
 
 	log.Print("scheduler starting...") 
 
-	schedulerLoop(ctx, service, interval)
-}
+	var wg sync.WaitGroup
 
-func schedulerLoop(ctx context.Context, service *scheduler.Service, interval time.Duration) {
-	for {
-		if err := service.RunOnce(ctx); err != nil {
-			log.Printf("scheduler cycle: %v", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(interval):
-		}
-	}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		service.SchedulerLoop(ctx, interval, batchSize, leaseTtl)
+	}()
+
+	go func() {
+		defer wg.Done()
+		service.AckListenerLoop(ctx)
+	}()
+
+	wg.Wait()
 }
 
 func required(key string) string {

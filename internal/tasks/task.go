@@ -23,15 +23,17 @@ const (
 	Submitted Status = "SUBMITTED"
 	Queued    Status = "QUEUED"
 	Expired   Status = "EXPIRED"
+	Inflight  Status = "INFLIGHT"
 )
 
 type Task struct {
-	ID          string          `json:"id"`
-	TaskType    Type            `json:"task_type"`
-	Status      Status          `json:"status"`
-	ScheduledAt time.Time       `json:"scheduled_at"`
-	ExpiresAt   time.Time       `json:"expires_at"`
-	Payload     json.RawMessage `json:"payload"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID          	string          `json:"id"`
+	TaskType    	Type            `json:"task_type"`
+	Status      	Status          `json:"status"`
+	ScheduledAt 	time.Time       `json:"scheduled_at"`
+	ExpiresAt   	time.Time       `json:"expires_at"`
+	Payload    		json.RawMessage `json:"payload"`
+	CreatedAt   	time.Time       `json:"created_at"`
+	UpdatedAt   	time.Time       `json:"updated_at"`
+	InflightExpiry  time.Time
 }
